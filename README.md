@@ -7,7 +7,8 @@ The js is about 250 lines of code. 8KB of text. A js font file (converted from s
 
 1. Find a free font you like. Get the ttf file
 2. Convert it online to svg
-3. Use opt-svg to converts the svg xml into json. It optimizes the kerning records while at it.
+3. Use some text editor to remove all the languages you don't care about.
+4. Use opt-svg to converts the svg xml into json. It optimizes the kerning records while at it.
 
 ### Run-time:
 
