@@ -2,6 +2,7 @@
 A lightweight javascript support for svg fonts
 
 The js is about 250 lines of code. 8KB of text. A js font file (converted from svg) can be like 20KB.
+Obviously, the SvgPath class can be used to parse and draw svg paths ("d" attribute) unrelated to fonts.
 
 ### Pre-process:
 
