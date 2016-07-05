@@ -99,13 +99,22 @@ function SvgFont(svg) {
   };
   this.create();
 
-  this.measureText = function(text) {
+  this.measureText = function(text,maxWidth) {
+    if( typeof(maxWidth) == 'undefined' ) maxWidth = 0;
     var n = text.length;
     var th = this.svg.em, tw = 0, x = 0;
     var cur = this.letters[' '];
+    var wi = 0, wx = 0, lines = [];
     for( var i = 0; i < n; i++ ) {
       var c = text.charAt(i);
+      if( maxWidth > 0 && x > maxWidth ) {
+        // go back to last space and pretend it's a newline
+        i = wi; lines.push(i);
+        x = wx;
+        c = '\n';
+      }
       if( c in this.letters ) {
+        if( c == ' ' ) { wi = i; wx = x; } // store last space position and index
         var k = cur.hkern[c];
         cur = this.letters[c];
         x += -k + cur.hadv;
@@ -114,13 +123,15 @@ function SvgFont(svg) {
         th += this.svg.em;
         cur = this.letters[' '];
         x = 0;
+        wi = i;
       } else {
-        cur = this.letters['?'];
+        cur = this.letters['--'];
         x += cur.hadv;
       }
     }
     if( tw < x ) tw = x;
-    return {width:tw, height:th};
+    lines.push(i);
+    return {width:tw, height:th, lines:lines};
   };
 
   this.drawGlyph = function(ctx,sx,sy,s,c) {
@@ -173,8 +184,9 @@ function ImgFont(svgfont,px,opt) {
   };
   this.create();
 
-  this.measureText = function(text) {
-    var r = this.svgfont.measureText(text);
+  this.measureText = function(text,maxWidth) {
+    if( typeof(maxWidth) == 'undefined' ) maxWidth = 0;
+    var r = this.svgfont.measureText( text, maxWidth/this.scale );
     r.width *= this.scale;
     r.height *= this.scale;
     return r;
@@ -187,11 +199,14 @@ function ImgFont(svgfont,px,opt) {
   };
 
   this.topalign = this.svgfont.svg.bbox.y1*this.scale+2;
-  this.drawText = function(ctx,x,y,text) {
-    text = (text + "");//.toLowerCase();
-    var ha = this.align, va = this.baseline, w = this.measureText(text).width;
+  this.drawText = function(ctx,x,y,text,maxWidth) {
+    this.drawTextEx( ctx, x, y, text+"", this.measureText(text+"",maxWidth) );
+  };
+  this.drawTextEx = function(ctx,x,y,text,textProps) {
+    var l = 0, next_i = textProps.lines[l];
+    var ha = this.align, va = this.baseline, w = textProps.width, h = textProps.height;
     x -= ha=="right" ? w : ha=="center" ? w/2 : 0;
-    y -= va=="bottom" ? this.em+1 : va=="top" ? this.topalign : va=="middle" ? (this.topalign+this.em+1)/2 : 0;
+    y -= va=="bottom" ? h+1 : va=="top" ? this.topalign : va=="middle" ? (this.topalign+h+1)/2 : 0;
     var ise = ctx.imageSmoothingEnabled;
     var ga = ctx.globalAlpha;
     ctx.imageSmoothingEnabled = false;
@@ -202,6 +217,10 @@ function ImgFont(svgfont,px,opt) {
     var cur = this.img[' '];
     for( var i = 0; i < n; i++ ) {
       var c = text.charAt(i);
+      if( i == next_i ) {
+        c = '\n';
+        next_i = textProps.lines[++l];
+      }
       if( c in this.img ) {
         px -= cur.hkern[c];
         cur = this.img[c];
@@ -213,7 +232,7 @@ function ImgFont(svgfont,px,opt) {
         cur = this.img[' '];
         px = x;
       } else {
-        cur = this.img['?'];
+        cur = this.img['--'];
         var sw = cur.hadv+1;
         ctx.drawImage( this.canvas,  cur.sx, 0, sw, sh,  px, py, sw, sh );
         px += sw-1;
@@ -222,9 +241,9 @@ function ImgFont(svgfont,px,opt) {
     ctx.imageSmoothingEnabled = ise;
     ctx.globalAlpha = ga;
   };
-  this.imgText = function(text) {
+  this.imgText = function(text,maxWidth) {
     var canvas = document.createElement("canvas");
-    var r = this.measureText(text);
+    var r = this.measureText(text,maxWidth);
     canvas.width = r.width;
     canvas.height = r.height;
     var ctx = canvas.getContext("2d");

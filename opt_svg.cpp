@@ -91,11 +91,21 @@ struct Opt : XParser::Events {
       k.k = atoi(tag.attr["k"].c_str());
       hkerns.push_back(k);
     }
-    else if( (tag.type == XTag::Open || tag.type == XTag::SelfClose) && tag.name == "glyph" ) {
+    else if( (tag.type == XTag::Open || tag.type == XTag::SelfClose) &&
+      (tag.name == "glyph" || tag.name == "missing-glyph")
+      ) {
       Glyph g;
-      g.id = get_char( tag.attr["unicode"] );
-      if( !g.id )
-        throw "bad char";
+      if( tag.name == "missing-glyph" ) {
+        g.id = 0;
+        g.name = "--";
+      }
+      else if( (g.id = get_char( tag.attr["unicode"] )) ) {
+        g.name = tag.attr["glyph-name"];
+      }
+      else {
+        //throw "bad char";
+        return;
+      }
 
       if( tag.attr.find("horiz-adv-x") != tag.attr.end() )
         g.hadv = atoi(tag.attr["horiz-adv-x"].c_str());
@@ -106,7 +116,6 @@ struct Opt : XParser::Events {
       //char* p0 = p;
       //while( *s ) { if( *s != '\n' && *s != '\r') *p++ = *s; s++; } g.d.resize(p-p0);
       while( *s ) { if( *s == '\n' || *s == '\r') *s = ' '; s++; }
-      g.name = tag.attr["glyph-name"];
 
       if( (int)glyphs.size() <= g.id )
         glyphs.resize(g.id+1);
@@ -192,9 +201,13 @@ struct Opt : XParser::Events {
 
       << "glyph: {\n";
     for( auto& g : glyphs ) {
-      if( !g.id ) continue;
-      std::cout << "  '" << (need_q(g.id) ? "\\" : "") << (char)g.id
-        << "':{ hadv:" << g.hadv << ", d:'" << g.d << "'},\n";
+      if( g.id )
+        std::cout << "  '" << (need_q(g.id) ? "\\" : "") << (char)g.id;
+      else if( g.name == "--" )
+        std::cout << "  '--";
+      else
+        continue;
+      std::cout << "':{ hadv:" << g.hadv << ", d:'" << g.d << "'},\n";
     }
     std::cout << "  '\\t':{ hadv:" << glyphs[' '].hadv << ", d:'' }\n"; // add \t?
     std::cout << "},\n"
@@ -248,15 +261,15 @@ int main( int argc, char* argv[] ) {
   }
   catch( XException& e ) {
     int pos = e.parser_->tagpos_ - e.parser_->doc_;
-    fprintf(stderr, "%s at position %d (%.*s...)\n", e.desc_, pos, 20, e.parser_->tagpos_ );
+    fprintf(stderr, "%s at position %d (%.*s...)\n", e.desc_, pos, 40, e.parser_->tagpos_ );
   }
   catch( const char* s ) {
     int pos = xp.tagpos_ - xp.doc_;
-    fprintf(stderr, "'%s' at position %d (%.*s...)\n", s, pos, 20, xp.tagpos_ );
+    fprintf(stderr, "'%s' at position %d (%.*s...)\n", s, pos, 40, xp.tagpos_ );
   }
   catch( ... ) {
     int pos = xp.tagpos_ - xp.doc_;
-    fprintf(stderr, "? at position %d (%.*s...)\n", pos, 20, xp.tagpos_ );
+    fprintf(stderr, "? at position %d (%.*s...)\n", pos, 40, xp.tagpos_ );
   }
 
 
