@@ -99,39 +99,49 @@ function SvgFont(svg) {
   };
   this.create();
 
-  this.measureText = function(text,maxWidth) {
-    if( typeof(maxWidth) == 'undefined' ) maxWidth = 0;
+  this.measureText = function(text,maxWidth,maxHeight) {
     var n = text.length;
-    var th = this.svg.em, tw = 0, x = 0;
+    var th = this.svg.em, tw = 0, ph = 0; // total width, total height, page height
+    var x = 0, k = 0;
     var cur = this.letters[' '];
-    var wi = 0, wx = 0, lines = [];
+    var wi = 0, wx = 0, lines = [], pages = [], tph = th;
     for( var i = 0; i < n; i++ ) {
       var c = text.charAt(i);
       if( maxWidth > 0 && x > maxWidth ) {
-        // go back to last space and pretend it's a newline
-        i = wi; lines.push(i);
-        x = wx;
+        if( wi > 0 ) { // break between words - use last space
+          i = wi;
+          x = wx;
+        } else { // break mid-word. yuck!
+          i -= 2;
+          x -= -k + cur.hadv;
+        }
         c = '\n';
       }
       if( c in this.letters ) {
         if( c == ' ' ) { wi = i; wx = x; } // store last space position and index
-        var k = cur.hkern[c];
+        k = cur.hkern[c];
         cur = this.letters[c];
         x += -k + cur.hadv;
       } else if( c == '\n' ) {
         if( tw < x ) tw = x;
-        th += this.svg.em;
+        lines.push(i);
+        if( maxHeight > 0 && tph + this.svg.em > maxHeight ) {
+          ph = tph;
+          tph = 0;
+          pages.push(i+1);
+        }
+        th += this.svg.em; tph += this.svg.em;
         cur = this.letters[' '];
-        x = 0;
-        wi = i;
+        x = wx = wi = 0;
       } else {
         cur = this.letters['--'];
         x += cur.hadv;
       }
     }
     if( tw < x ) tw = x;
-    lines.push(i);
-    return {width:tw, height:th, lines:lines};
+    lines.push(n);
+    pages.push(n);
+    return {width:tw, height:th, lines:lines, pages:pages, pageHeight:ph, plhint:0};
   };
 
   this.drawGlyph = function(ctx,sx,sy,s,c) {
@@ -159,7 +169,7 @@ function ImgFont(svgfont,px,opt) {
 
   this.create = function() {
     // calc scaled widths and kerns and adjust
-    var sx = 1;
+    var sx = 1, sy = 1;
     var letters = this.svgfont.letters;
     for( var c in letters ) {
       var cur = this.img[c] = {}, orig = letters[c];
@@ -173,8 +183,26 @@ function ImgFont(svgfont,px,opt) {
       //TODO: add something more sensible from bounding box
       sx += Math.floor(cur.hadv + 4.99); // round next char to pixel
     }
-    this.canvas.width = sx;
-    this.canvas.height = this.em + 2;
+    // optimize to a square
+    var qsize = Math.sqrt(sx * this.em);
+    var size = Math.pow( 2, Math.ceil( Math.log(qsize)/Math.log(2) ) );
+    for( var t = 0; t < 2; t++) {
+      sx = 1;
+      for( var c in letters ) {
+        var cur = this.img[c], orig = letters[c];
+        cur.sy = sy;
+        cur.sx = sx;
+        sx += Math.floor(cur.hadv + 4.99); // round next char to pixel
+        if( sx >= size ) {
+          cur.sy = (sy += this.em + 2);
+          cur.sx = 1; sx = Math.floor(cur.hadv + 4.99);
+        }
+      }
+      if( sy + this.em + 2 < size ) break;
+      size *= 2;
+    }
+    this.canvas.width = size;
+    this.canvas.height = size;
     var ctx = this.ctx = this.canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     for( var c in this.img )
@@ -184,11 +212,13 @@ function ImgFont(svgfont,px,opt) {
   };
   this.create();
 
-  this.measureText = function(text,maxWidth) {
+  this.measureText = function(text,maxWidth,maxHeight) {
     if( typeof(maxWidth) == 'undefined' ) maxWidth = 0;
-    var r = this.svgfont.measureText( text, maxWidth/this.scale );
+    if( typeof(maxHeight) == 'undefined' ) maxHeight = 0;
+    var r = this.svgfont.measureText( text, maxWidth/this.scale, maxHeight/this.scale );
     r.width *= this.scale;
     r.height *= this.scale;
+    r.pageHeight *= this.scale;
     return r;
   };
   this.setStyle = function(style,alpha) {
@@ -199,11 +229,16 @@ function ImgFont(svgfont,px,opt) {
   };
 
   this.topalign = this.svgfont.svg.bbox.y1*this.scale+2;
-  this.drawText = function(ctx,x,y,text,maxWidth) {
-    this.drawTextEx( ctx, x, y, text+"", this.measureText(text+"",maxWidth) );
+  this.drawText = function(ctx,x,y,text,maxWidth,maxHeight) {
+    this.drawTextEx( ctx, x, y, text+"", this.measureText(text+"",maxWidth,maxHeight), 0 );
   };
-  this.drawTextEx = function(ctx,x,y,text,textProps) {
-    var l = 0, next_i = textProps.lines[l];
+  this.drawTextEx = function(ctx,x,y,text,textProps,pg) {
+    var n = text.length;
+    var start = pg>0 ? textProps.pages[pg-1] : 0;
+    var end = textProps.pages[pg];
+    var l = textProps.plhint, next_i = textProps.lines[l];
+    while( textProps.lines[l] < start ) l++;
+    while( l > 0 && textProps.lines[l-1] >= start ) l--;
     var ha = this.align, va = this.baseline, w = textProps.width, h = textProps.height;
     x -= ha=="right" ? w : ha=="center" ? w/2 : 0;
     y -= va=="bottom" ? h+1 : va=="top" ? this.topalign : va=="middle" ? (this.topalign+h+1)/2 : 0;
@@ -211,35 +246,34 @@ function ImgFont(svgfont,px,opt) {
     var ga = ctx.globalAlpha;
     ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = this.alpha;
-    var n = text.length;
     var px = x, py = y;
     var sh = this.em+2;
     var cur = this.img[' '];
-    for( var i = 0; i < n; i++ ) {
+    for( var i = start; i < end; i++ ) {
       var c = text.charAt(i);
       if( i == next_i ) {
-        c = '\n';
         next_i = textProps.lines[++l];
+        py += this.em;
+        cur = this.img[' '];
+        px = x;
+        if( c==' ' || c == '\n' ) continue;
       }
       if( c in this.img ) {
         px -= cur.hkern[c];
         cur = this.img[c];
         var sw = cur.hadv+1;
-        ctx.drawImage( this.canvas,  cur.sx, 0, sw, sh,  px, py, sw, sh );
+        ctx.drawImage( this.canvas,  cur.sx, cur.sy, sw, sh,  px, py, sw, sh );
         px += sw-1;
-      } else if( c == '\n' ) {
-        py += this.em;
-        cur = this.img[' '];
-        px = x;
       } else {
         cur = this.img['--'];
         var sw = cur.hadv+1;
-        ctx.drawImage( this.canvas,  cur.sx, 0, sw, sh,  px, py, sw, sh );
+        ctx.drawImage( this.canvas,  cur.sx, cur.sy, sw, sh,  px, py, sw, sh );
         px += sw-1;
       }
     }
     ctx.imageSmoothingEnabled = ise;
     ctx.globalAlpha = ga;
+    textProps.plhint = l; // for the next page
   };
   this.imgText = function(text,maxWidth) {
     var canvas = document.createElement("canvas");
